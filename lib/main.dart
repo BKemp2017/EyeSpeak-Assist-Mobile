@@ -2,6 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:camera/camera.dart';
+import 'phrases_screen.dart';
+
+
 
 import 'blink_detector.dart';
 
@@ -33,6 +37,7 @@ class KeyboardScreen extends StatefulWidget {
 
 class _KeyboardScreenState extends State<KeyboardScreen> {
   final List<List<String>> _layout = [
+    ['PHRASES'],
     'QWERTYUIOP'.split(''),
     'ASDFGHJKL'.split(''),
     'ZXCVBNM./-'.split(''),
@@ -56,7 +61,7 @@ class _KeyboardScreenState extends State<KeyboardScreen> {
     _timer = Timer.periodic(const Duration(milliseconds: 1500), (timer) {
       setState(() {
         _col++;
-        if (_col >= _layout[_row].length) {
+        if (_layout[_row] == null || _col >= _layout[_row]!.length) {
           _col = 0;
           _row = (_row + 1) % _layout.length;
         }
@@ -71,22 +76,32 @@ class _KeyboardScreenState extends State<KeyboardScreen> {
   void _onBlink() async {
     if (_cooldown) return;
     _cooldown = true;
-    final ch = _layout[_row][_col];
-    setState(() {
-      if (ch == '-') {
-        _tts.stop();
-        _tts.speak(_text);
-        _text = '';
-      } else if (ch == '.') {
-        _text += ' ';
-      } else if (ch == '/') {
-        if (_text.isNotEmpty) {
-          _text = _text.substring(0, _text.length - 1);
+
+    final selected = _layout[_row][_col];
+
+    if (selected == "PHRASES") {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => PhrasesScreen(tts: _tts)),
+      );
+    } else {
+      setState(() {
+        if (selected == '-') {
+          _tts.stop();
+          _tts.speak(_text);
+          _text = '';
+        } else if (selected == '.') {
+          _text += ' ';
+        } else if (selected == '/') {
+          if (_text.isNotEmpty) {
+            _text = _text.substring(0, _text.length - 1);
+          }
+        } else {
+          _text += selected;
         }
-      } else {
-        _text += ch;
-      }
-    });
+      });
+    }
+
     await Future.delayed(const Duration(milliseconds: 800));
     _cooldown = false;
   }
@@ -101,39 +116,86 @@ class _KeyboardScreenState extends State<KeyboardScreen> {
   Widget _buildKey(String char, bool highlight) {
     return Container(
       margin: const EdgeInsets.all(4),
-      width: 50,
-      height: 50,
+      width: char == "PHRASES" ? 150 : 50,
+      height: 60,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        border: Border.all(color: highlight ? Colors.green : Colors.white, width: 2),
-        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+          color: highlight ? Colors.green : Colors.white,
+          width: 2,
+        ),
+        borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(char, style: const TextStyle(fontSize: 20)),
+      child: Text(
+        char,
+        style: const TextStyle(fontSize: 22),
+      ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(_text, style: const TextStyle(fontSize: 24, color: Colors.yellow)),
-            ),
-            for (int r = 0; r < _layout.length; r++)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  for (int c = 0; c < _layout[r].length; c++)
-                    _buildKey(_layout[r][c], r == _row && c == _col),
-                ],
-              ),
-          ],
-        ),
+
+Widget _buildCameraPreview() {
+  final controller = _detector?.controller;
+  if (controller != null && controller.value.isInitialized) {
+    return AspectRatio(
+      aspectRatio: controller.value.aspectRatio,
+      child: CameraPreview(controller),
+    );
+  } else {
+    return const Center(
+      child: Text(
+        "Camera loading...",
+        style: TextStyle(color: Colors.grey),
       ),
     );
   }
 }
+
+
+@override
+Widget build(BuildContext context) {
+  return Scaffold(
+    body: SafeArea(
+      child: Column(
+        children: [
+          Expanded(
+            child: Center(
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text(
+                      _text,
+                      style: const TextStyle(fontSize: 32, color: Colors.yellow),
+                    ),
+                  ),
+                  for (int r = 0; r < _layout.length; r++)
+                    if (_layout[r] == null)
+                      Center(
+                        child: _buildKey("PHRASES", _row == r),
+                      )
+                    else
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            for (int c = 0; c < _layout[r]!.length; c++)
+                              _buildKey(_layout[r]![c]!, r == _row && c == _col),
+                          ],
+                        ),
+                      ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+}
+
+

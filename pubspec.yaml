@@ -12,6 +12,7 @@ dependencies:
   google_mlkit_face_detection: ^0.13.1
   camera: ^0.11.2
   flutter_tts: ^4.2.3
+  image: ^4.1.7
 
 flutter:
   uses-material-design: true
