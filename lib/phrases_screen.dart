@@ -64,7 +64,10 @@ class _PhrasesScreenState extends State<PhrasesScreen> {
     final confirm = await _showConfirmationDialog(selected);
     if (confirm) {
       await widget.tts.speak(selected);
-      Navigator.pop(context);
+
+      if (context.mounted) {
+        Navigator.pop(context);
+      }
     }
 
     await Future.delayed(const Duration(seconds: 1));

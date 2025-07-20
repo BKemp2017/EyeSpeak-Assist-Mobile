@@ -4,9 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:camera/camera.dart';
 import 'phrases_screen.dart';
-
-
-
 import 'blink_detector.dart';
 
 void main() {
@@ -35,56 +32,97 @@ class KeyboardScreen extends StatefulWidget {
   State<KeyboardScreen> createState() => _KeyboardScreenState();
 }
 
-class _KeyboardScreenState extends State<KeyboardScreen> {
+class _KeyboardScreenState extends State<KeyboardScreen> with WidgetsBindingObserver {
+  bool _cooldown = false;
   final List<List<String>> _layout = [
     ['PHRASES'],
     'QWERTYUIOP'.split(''),
     'ASDFGHJKL'.split(''),
     'ZXCVBNM./-'.split(''),
   ];
-
-  int _row = 0;
+  final List<int> _rowCycle = [0, 1, 0, 2, 0, 3];
+  int _cycleIndex = 0;
   int _col = 0;
   String _text = '';
   late Timer _timer;
   late FlutterTts _tts;
   BlinkDetector? _detector;
-  bool _cooldown = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _tts = FlutterTts();
     _tts.setLanguage("en-US");
     _tts.setSpeechRate(0.5);
-    _detector = BlinkDetector(onBlink: _onBlink);
-    _timer = Timer.periodic(const Duration(milliseconds: 1500), (timer) {
-      setState(() {
-        _col++;
-        if (_layout[_row] == null || _col >= _layout[_row]!.length) {
-          _col = 0;
-          _row = (_row + 1) % _layout.length;
-        }
-      });
-    });
+    _startBlinkAndCycle();
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
   }
 
+  void _startBlinkAndCycle() {
+    print("[Blink] Starting blink detector and timer");
+    _detector?.dispose();
+    _detector = BlinkDetector(onBlink: _onBlink);
+    _timer = Timer.periodic(const Duration(milliseconds: 1500), (timer) {
+      setState(() {
+        _col++;
+        final currentRow = _rowCycle[_cycleIndex];
+        if (_col >= _layout[currentRow].length) {
+          _col = 0;
+          _cycleIndex = (_cycleIndex + 1) % _rowCycle.length;
+        }
+      });
+    });
+  }
+
+  void _disposeDetectorAndTimer() {
+    print("[Blink] Disposing detector and timer");
+    _timer.cancel();
+    _detector?.dispose();
+    _detector = null;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _disposeDetectorAndTimer();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    print("[Lifecycle] App state changed: $state");
+    if (state == AppLifecycleState.paused) {
+      _disposeDetectorAndTimer();
+    } else if (state == AppLifecycleState.resumed) {
+      _startBlinkAndCycle();
+    }
+  }
+
   void _onBlink() async {
     if (_cooldown) return;
     _cooldown = true;
+    final row = _rowCycle[_cycleIndex];
 
-    final selected = _layout[_row][_col];
+    if (row == 0) {
+      print("[Blink] PHRASES screen opened");
+      _disposeDetectorAndTimer();
 
-    if (selected == "PHRASES") {
-      Navigator.push(
+      await Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => PhrasesScreen(tts: _tts)),
       );
+
+      print("[Blink] Returned from phrases screen");
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _startBlinkAndCycle();
+      });
     } else {
+      final selected = _layout[row][_col];
+      print("[Blink] Selected: $selected");
       setState(() {
         if (selected == '-') {
           _tts.stop();
@@ -104,13 +142,7 @@ class _KeyboardScreenState extends State<KeyboardScreen> {
 
     await Future.delayed(const Duration(milliseconds: 800));
     _cooldown = false;
-  }
-
-  @override
-  void dispose() {
-    _timer.cancel();
-    _detector?.dispose();
-    super.dispose();
+    print("[Blink] Cooldown reset");
   }
 
   Widget _buildKey(String char, bool highlight) {
@@ -133,48 +165,24 @@ class _KeyboardScreenState extends State<KeyboardScreen> {
     );
   }
 
-
-Widget _buildCameraPreview() {
-  final controller = _detector?.controller;
-  if (controller != null && controller.value.isInitialized) {
-    return AspectRatio(
-      aspectRatio: controller.value.aspectRatio,
-      child: CameraPreview(controller),
-    );
-  } else {
-    return const Center(
-      child: Text(
-        "Camera loading...",
-        style: TextStyle(color: Colors.grey),
-      ),
-    );
-  }
-}
-
-
-@override
-Widget build(BuildContext context) {
-  return Scaffold(
-    body: SafeArea(
-      child: Column(
-        children: [
-          Expanded(
-            child: Center(
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Text(
-                      _text,
-                      style: const TextStyle(fontSize: 32, color: Colors.yellow),
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: Center(
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Text(
+                        _text,
+                        style: const TextStyle(fontSize: 32, color: Colors.yellow),
+                      ),
                     ),
-                  ),
-                  for (int r = 0; r < _layout.length; r++)
-                    if (_layout[r] == null)
-                      Center(
-                        child: _buildKey("PHRASES", _row == r),
-                      )
-                    else
+                    for (int r = 0; r < _layout.length; r++)
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         child: Wrap(
@@ -182,20 +190,18 @@ Widget build(BuildContext context) {
                           spacing: 6,
                           runSpacing: 4,
                           children: [
-                            for (int c = 0; c < _layout[r]!.length; c++)
-                              _buildKey(_layout[r]![c]!, r == _row && c == _col),
+                            for (int c = 0; c < _layout[r].length; c++)
+                              _buildKey(_layout[r][c], _rowCycle[_cycleIndex] == r && c == _col),
                           ],
                         ),
                       ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
-}
-
-

@@ -104,6 +104,13 @@ class _EditPhrasesScreenState extends State<EditPhrasesScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
+              final newPhrase = _controller.text.trim();
+              if (newPhrase.isNotEmpty && !_phrases.contains(newPhrase)) {
+                setState(() {
+                  _phrases.add(newPhrase);
+                  _controller.clear();
+                });
+              }
               await _savePhrases();
               if (context.mounted) Navigator.pop(context, true);
             },
