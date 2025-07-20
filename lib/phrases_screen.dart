@@ -1,9 +1,12 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import 'blink_detector.dart'; // 👈 Make sure this is imported
+import 'blink_detector.dart';
+import 'screens/edit_phrases_screen.dart';
 
 class PhrasesScreen extends StatefulWidget {
   final FlutterTts tts;
@@ -24,14 +27,28 @@ class _PhrasesScreenState extends State<PhrasesScreen> {
   void initState() {
     super.initState();
     _loadPhrases();
-    _detector = BlinkDetector(onBlink: _onBlink); // 👈 Blink detector just for this screen
+    _detector = BlinkDetector(onBlink: _onBlink);
   }
 
-  void _loadPhrases() async {
-    final data = await rootBundle.loadString('assets/phrases.json');
-    final json = jsonDecode(data);
-    setState(() => _phrases = List<String>.from(json['phrases'] ?? []));
+  Future<void> _loadPhrases() async {
+    final directory = await getApplicationDocumentsDirectory();
+    final file = File('${directory.path}/phrases.json');
 
+    if (!(await file.exists())) {
+      final assetData = await rootBundle.loadString('assets/phrases.json');
+      await file.writeAsString(assetData);
+    }
+
+    final data = await file.readAsString();
+    final json = jsonDecode(data);
+    final loaded = List<String>.from(json['phrases'] ?? []);
+
+    setState(() {
+      _phrases = loaded;
+      _index = 0;
+    });
+
+    _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 2), (_) {
       setState(() {
         _index = (_index + 1) % _phrases.length;
@@ -47,7 +64,7 @@ class _PhrasesScreenState extends State<PhrasesScreen> {
     final confirm = await _showConfirmationDialog(selected);
     if (confirm) {
       await widget.tts.speak(selected);
-      Navigator.pop(context); // back to keyboard
+      Navigator.pop(context);
     }
 
     await Future.delayed(const Duration(seconds: 1));
@@ -55,29 +72,31 @@ class _PhrasesScreenState extends State<PhrasesScreen> {
   }
 
   Future<bool> _showConfirmationDialog(String phrase) async {
-    bool? result = await showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text("Select '$phrase'?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("YES"),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text("NO"),
-          ),
-        ],
+    return await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BlinkConfirmDialog(phrase: phrase),
       ),
     );
-    return result ?? false;
+  }
+
+  void _navigateToEditor() async {
+    final updated = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const EditPhrasesScreen()),
+    );
+    if (updated == true) {
+     await _loadPhrases();
+
+     _detector?.dispose();
+     _detector = BlinkDetector(onBlink: _onBlink);
+    }
   }
 
   @override
   void dispose() {
     _timer?.cancel();
-    _detector?.dispose(); // 👈 Clean up camera stream
+    _detector?.dispose();
     super.dispose();
   }
 
@@ -103,6 +122,105 @@ class _PhrasesScreenState extends State<PhrasesScreen> {
               ),
               const SizedBox(height: 20),
               const Text("(Blink to Select)", style: TextStyle(color: Colors.grey)),
+              const SizedBox(height: 40),
+              ElevatedButton(
+                onPressed: _navigateToEditor,
+                child: const Text("Edit Phrases"),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// 👁️ Blink-Based Confirm Dialog
+class BlinkConfirmDialog extends StatefulWidget {
+  final String phrase;
+  const BlinkConfirmDialog({required this.phrase, super.key});
+
+  @override
+  State<BlinkConfirmDialog> createState() => _BlinkConfirmDialogState();
+}
+
+class _BlinkConfirmDialogState extends State<BlinkConfirmDialog> {
+  int _index = 0; // 0 = YES, 1 = NO
+  Timer? _timer;
+  BlinkDetector? _detector;
+  bool _cooldown = false;
+
+  final List<String> _options = ['YES', 'NO'];
+
+  @override
+  void initState() {
+    super.initState();
+
+    _detector = BlinkDetector(onBlink: _onBlink);
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) {
+      setState(() {
+        _index = (_index + 1) % _options.length;
+      });
+    });
+  }
+
+  void _onBlink() async {
+    if (_cooldown) return;
+    _cooldown = true;
+
+    final result = _index == 0; // YES = true
+    Navigator.pop(context, result);
+
+    await Future.delayed(const Duration(seconds: 1));
+    _cooldown = false;
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _detector?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                "Select '${widget.phrase}'?",
+                style: const TextStyle(fontSize: 26, color: Colors.cyanAccent),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 40),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(_options.length, (i) {
+                  final selected = i == _index;
+                  return Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 20),
+                    padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 30),
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: selected ? Colors.yellow : Colors.white24,
+                        width: 3,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      color: selected ? Colors.white10 : Colors.transparent,
+                    ),
+                    child: Text(
+                      _options[i],
+                      style: const TextStyle(fontSize: 32, color: Colors.white),
+                    ),
+                  );
+                }),
+              ),
+              const SizedBox(height: 20),
+              const Text("(Blink to Confirm)", style: TextStyle(color: Colors.grey)),
             ],
           ),
         ),
